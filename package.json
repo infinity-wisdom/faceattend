@@ -1,14 +1,24 @@
 {
   "name": "faceattend",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "expo-router/entry",
   "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
+    "bcryptjs": "^3.0.3",
+    "convex": "^1.42.3",
     "expo": "~57.0.8",
+    "expo-camera": "^57.0.3",
+    "expo-linear-gradient": "^57.0.1",
+    "expo-router": "^57.0.8",
+    "expo-secure-store": "^57.0.1",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.0"
+    "react-native": "0.86.0",
+    "react-native-safe-area-context": "^5.8.0",
+    "react-native-screens": "^4.26.2"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
   },

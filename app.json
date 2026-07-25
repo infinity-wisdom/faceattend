@@ -1,13 +1,26 @@
 {
   "expo": {
-    "name": "faceattend",
+    "name": "FaceAttend",
     "slug": "faceattend",
     "version": "1.0.0",
+    "scheme": "faceattend",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FaceAttend needs camera access to verify your identity for attendance."
+        }
+      ]
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "FaceAttend needs camera access to verify your identity for attendance."
+      }
     },
     "android": {
       "adaptiveIcon": {
