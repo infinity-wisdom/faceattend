@@ -13,6 +13,7 @@ import type * as auth from "../auth.js";
 import type * as courses from "../courses.js";
 import type * as faceVerification from "../faceVerification.js";
 import type * as files from "../files.js";
+import type * as seed from "../seed.js";
 import type * as students from "../students.js";
 
 import type {
@@ -27,6 +28,7 @@ declare const fullApi: ApiFromModules<{
   courses: typeof courses;
   faceVerification: typeof faceVerification;
   files: typeof files;
+  seed: typeof seed;
   students: typeof students;
 }>;
 
