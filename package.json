@@ -20,6 +20,8 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/react": "~19.2.2",
+    "expo-constants": "~18.0.9",
+    "expo-linking": "~8.0.8",
     "typescript": "~6.0.3"
   },
   "scripts": {
