@@ -11,6 +11,7 @@
 import type * as attendance from "../attendance.js";
 import type * as auth from "../auth.js";
 import type * as courses from "../courses.js";
+import type * as crypto from "../crypto.js";
 import type * as faceVerification from "../faceVerification.js";
 import type * as files from "../files.js";
 import type * as seed from "../seed.js";
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   attendance: typeof attendance;
   auth: typeof auth;
   courses: typeof courses;
+  crypto: typeof crypto;
   faceVerification: typeof faceVerification;
   files: typeof files;
   seed: typeof seed;
