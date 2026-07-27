@@ -25,12 +25,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const student = useQuery(api.auth.me, token ? { token } : 'skip');
 
   useEffect(() => {
-    SecureStore.getItemAsync(TOKEN_KEY).then((stored) => {
-      setToken(stored);
-      setIsLoading(false);
-    });
+    SecureStore.getItemAsync(TOKEN_KEY)
+      .then((stored) => {
+        setToken(stored);
+      })
+      .catch((err) => {
+        console.warn('Failed to read stored session, starting logged out:', err);
+        setToken(null);
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
   }, []);
-
   const persistToken = async (t: string) => {
     await SecureStore.setItemAsync(TOKEN_KEY, t);
     setToken(t);
