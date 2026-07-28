@@ -1,11 +1,52 @@
-'use node';
-
 import { v } from 'convex/values';
 import { action } from './_generated/server';
 import { internal } from './_generated/api';
 
-// FACE_API_URL is set with: npx convex env set FACE_API_URL https://your-service.onrender.com
-// It should point at the Flask service in the /face-api folder of this project.
+// Face++ (Megvii) API integration. Set these with:
+//   npx convex env set FACEPP_API_KEY <your key>
+//   npx convex env set FACEPP_API_SECRET <your secret>
+// Optionally override the region (defaults to the US endpoint):
+//   npx convex env set FACEPP_API_BASE_URL https://api-us.faceplusplus.com
+const FACEPP_BASE_URL = process.env.FACEPP_API_BASE_URL || 'https://api-us.faceplusplus.com';
+
+async function callFacepp(endpoint: string, params: Record<string, string>) {
+  const apiKey = process.env.FACEPP_API_KEY;
+  const apiSecret = process.env.FACEPP_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    throw new Error(
+      'FACEPP_API_KEY / FACEPP_API_SECRET are not configured. Set them with `npx convex env set`.'
+    );
+  }
+
+  const body = new URLSearchParams({ api_key: apiKey, api_secret: apiSecret, ...params });
+  const response = await fetch(`${FACEPP_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  const json: any = await response.json().catch(() => ({}));
+  if (!response.ok || json.error_message) {
+    throw new Error(`Face++ error (${response.status}): ${json.error_message || 'unknown error'}`);
+  }
+  return json;
+}
+
+// Interpupillary distance as a fraction of face width — shrinks with head
+// yaw due to perspective foreshortening. Used to confirm the person
+// actually turned their head between the two captures (basic anti-photo
+// liveness check), rather than the same static image being shown twice.
+function eyeDistanceRatio(face: any): number | null {
+  const landmark = face?.landmark;
+  const rect = face?.face_rectangle;
+  if (!landmark?.left_eye_pupil || !landmark?.right_eye_pupil || !rect?.width) return null;
+
+  const dx = landmark.left_eye_pupil.x - landmark.right_eye_pupil.x;
+  const dy = landmark.left_eye_pupil.y - landmark.right_eye_pupil.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  return distance / rect.width;
+}
+
 export const verifyAndMarkAttendance = action({
   args: {
     token: v.string(),
@@ -36,84 +77,89 @@ export const verifyAndMarkAttendance = action({
       return { verified: false, live: false, confidence: 0, reason: 'Reference photo not found.' };
     }
 
-    const faceApiUrl = process.env.FACE_API_URL;
-    if (!faceApiUrl) {
-      throw new Error('FACE_API_URL is not configured. Set it with `npx convex env set FACE_API_URL <url>`.');
-    }
-    const apiKey = process.env.FACE_API_KEY;
+    try {
+      // --- 1. Liveness: detect facial landmarks in both frames and confirm
+      // the head actually turned between them ---
+      const [detect1, detect2] = await Promise.all([
+        callFacepp('/facepp/v3/detect', { image_base64: args.frame1Base64, return_landmark: '1' }),
+        callFacepp('/facepp/v3/detect', { image_base64: args.frame2Base64, return_landmark: '1' }),
+      ]);
 
-    // Render's free tier puts the service to sleep after inactivity. The
-    // first request after a while has to wake the container, reload
-    // TensorFlow, and load the face model — which can take longer than
-    // Render's own gateway timeout, producing a 502 before the service is
-    // actually ready. Retrying a couple of times with a short wait papers
-    // over exactly that cold-start window instead of failing the check-in.
-    const maxAttempts = 4;
-    let lastError: string | null = null;
-    let response: Response | null = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const res = await fetch(`${faceApiUrl}/verify-liveness`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(apiKey ? { 'X-Api-Key': apiKey } : {}),
-          },
-          body: JSON.stringify({
-            frame1: args.frame1Base64,
-            frame2: args.frame2Base64,
-            turn_direction: args.turnDirection,
-            reference_url: referenceUrl,
-          }),
-        });
-
-        if (res.ok) {
-          response = res;
-          break;
-        }
-
-        // 502/503/504 usually mean the service is still waking up — worth
-        // retrying. Anything else (e.g. 401 bad key, 400 bad input) won't
-        // fix itself on retry, so fail fast instead.
-        if (![502, 503, 504].includes(res.status) || attempt === maxAttempts) {
-          const text = await res.text();
-          lastError = `Face verification service error (${res.status}): ${text.slice(0, 300)}`;
-          break;
-        }
-      } catch (err: any) {
-        lastError = err?.message ?? String(err);
+      const face1 = detect1.faces?.[0];
+      const face2 = detect2.faces?.[0];
+      if (!face1 || !face2) {
+        return {
+          verified: false,
+          live: false,
+          confidence: 0,
+          reason: 'Could not locate a clear face in both frames.',
+        };
       }
 
-      // Wait a bit longer each retry (3s, 6s, 9s...) to give the service
-      // time to finish waking up.
-      await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
-    }
+      const ratio1 = eyeDistanceRatio(face1);
+      const ratio2 = eyeDistanceRatio(face2);
+      if (ratio1 == null || ratio2 == null) {
+        return {
+          verified: false,
+          live: false,
+          confidence: 0,
+          reason: 'Could not locate a clear face in both frames.',
+        };
+      }
 
-    if (!response) {
+      const MIN_YAW_DELTA = 0.06; // ~6% relative change in interpupillary distance
+      const delta = ratio2 - ratio1;
+      if (Math.abs(delta) < MIN_YAW_DELTA) {
+        return {
+          verified: false,
+          live: false,
+          confidence: 0,
+          reason: 'No head movement detected — please turn your head when prompted.',
+        };
+      }
+
+      // --- 2. Identity: compare each frame against the enrolled reference photo ---
+      const [compare1, compare2] = await Promise.all([
+        callFacepp('/facepp/v3/compare', {
+          image_base64_1: args.frame1Base64,
+          image_url2: referenceUrl,
+        }),
+        callFacepp('/facepp/v3/compare', {
+          image_base64_1: args.frame2Base64,
+          image_url2: referenceUrl,
+        }),
+      ]);
+
+      // Face++ recommends picking a confidence threshold based on your
+      // acceptable false-accept-rate; 1e-3 is a reasonable default for a
+      // campus attendance app (stricter thresholds are available at 1e-4/1e-5
+      // if you want fewer false accepts at the cost of more false rejects).
+      const threshold = compare1.thresholds?.['1e-3'] ?? 75;
+      const conf1: number = compare1.confidence ?? 0;
+      const conf2: number = compare2.confidence ?? 0;
+      const verified = conf1 >= threshold && conf2 >= threshold;
+      const confidence = Math.round(((conf1 + conf2) / 2) * 10) / 10;
+
+      await ctx.runMutation(internal.attendance._recordAttendance, {
+        classSessionId: args.classSessionId,
+        studentId: student._id,
+        status: verified ? 'present' : 'rejected',
+        confidence,
+      });
+
+      return {
+        verified,
+        live: true,
+        confidence,
+        reason: verified ? undefined : 'Face did not match enrolled record.',
+      };
+    } catch (err: any) {
       return {
         verified: false,
         live: false,
         confidence: 0,
-        reason:
-          'The verification service is starting up (this can happen after it has been idle) — please try again in a moment.',
+        reason: err?.message ?? 'Face verification failed. Please try again.',
       };
     }
-
-    const result = await response.json();
-    // Expected shape from face-api/app.py /verify-liveness:
-    // { verified: boolean, live: boolean, confidence: number, reason?: string }
-    const verified: boolean = !!result.verified;
-    const live: boolean = !!result.live;
-    const confidence: number = typeof result.confidence === 'number' ? result.confidence : 0;
-
-    await ctx.runMutation(internal.attendance._recordAttendance, {
-      classSessionId: args.classSessionId,
-      studentId: student._id,
-      status: verified && live ? 'present' : 'rejected',
-      confidence,
-    });
-
-    return { verified, live, confidence, reason: result.reason };
   },
 });
