@@ -1,23 +1,25 @@
 # FaceAttend
 
-A React Native (Expo) mobile app that lets university students mark attendance
-using facial verification, backed by Convex and an open-source DeepFace
-verification service.
+A React Native (Expo) mobile app that lets university students mark
+attendance using facial verification, backed by Convex and the Face++
+(Megvii) facial recognition API.
 
 ## How it fits together
 
-```
-faceattend/                 <- the mobile app (Expo Router + Convex client)
-  app/                       screens
-  components/                shared UI pieces
-  convex/                     backend: schema, auth, courses, attendance, face verification
-  face-api/                  Python/Flask service wrapping DeepFace, deployed separately to Render
-```
+faceattend/
+app/ screens (Expo Router)
+components/ shared UI pieces
+convex/ backend: schema, auth, courses, attendance, face verification
 
-The flow: student opens the camera → app captures a live selfie → Convex
-action sends it + the student's enrolled reference photo to the DeepFace
-service on Render → DeepFace compares the two faces → Convex records
-"present" or "rejected" in the database.
+The flow: student opens the camera → the app automatically captures a
+frontal selfie, then prompts a head turn and captures a second frame → a
+Convex action sends both frames to Face++ for a liveness check (did the
+head actually turn?) and an identity check (does the face match the
+enrolled reference photo?) → Convex records "present" or "rejected".
+
+Unlike an earlier version of this project, there's **no separate server to
+deploy** — Face++ is a hosted API, so Convex talks to it directly. (If
+you're coming from the DeepFace/Render setup, that whole piece is gone now.)
 
 ---
 
@@ -27,102 +29,75 @@ service on Render → DeepFace compares the two faces → Convex records
   Android/iOS simulator.
 - [Node.js](https://nodejs.org) 18+ installed on your computer.
 - A [Convex](https://convex.dev) account (free tier is fine).
-- A [Render](https://render.com) account (free tier is fine to start).
+- A [Face++](https://www.faceplusplus.com) account and API key (free tier
+  is fine to start — see step 4).
 - A [GitHub](https://github.com) account.
 
 ## 2. Install dependencies
 
 ```bash
 cd faceattend
-npm install
+npm install --legacy-peer-deps
 ```
 
 ## 3. Set up Convex
-
-Convex is your database + backend functions. Run:
 
 ```bash
 npx convex dev
 ```
 
-The first time, this will:
-- Open a browser to log you into Convex
-- Ask you to create a new project (name it `faceattend`)
-- Generate a `convex/_generated` folder and a `.env.local` file containing
-  your `CONVEX_DEPLOYMENT` and deployment URL
+The first time, this logs you into Convex, creates a project, and generates
+a `.env.local` file with your `CONVEX_DEPLOYMENT` and
+`EXPO_PUBLIC_CONVEX_URL`. **Leave this command running** in its own
+terminal — it watches your `convex/` folder and deploys changes live.
 
-**Leave this command running in a terminal** — it watches your `convex/`
-folder and pushes changes live, and it's how your backend functions get
-deployed.
+## 4. Get a Face++ API key
 
-Copy the Convex URL it prints (something like
-`https://happy-animal-123.convex.cloud`) into a new file called `.env` in the
-project root:
+1. Sign up at [console.faceplusplus.com](https://console.faceplusplus.com)
+2. Create an API key (their free tier includes Face Detection and Face
+   Comparing/Verification at a shared rate limit — plenty for testing and
+   likely enough for a single classroom's worth of check-ins)
+3. You'll get an **API Key** and an **API Secret** — copy both
 
-```
-EXPO_PUBLIC_CONVEX_URL=https://happy-animal-123.convex.cloud
-```
+## 5. Point Convex at Face++
 
-(There's a `.env.example` in the repo you can copy: `cp .env.example .env`)
-
-## 4. Deploy the face verification service to Render
-
-This is the DeepFace API. It can't run inside Convex or Expo — it needs its
-own server because DeepFace is a Python library, not a hosted API.
-
-1. Push this repo to GitHub first (see step 6 below) — Render deploys from a
-   GitHub repo.
-2. In the Render dashboard, click **New +** → **Blueprint**.
-3. Connect your GitHub account and select your `faceattend` repo.
-4. Render will detect `face-api/render.yaml` and set up the service
-   automatically (it builds the Dockerfile in `face-api/`).
-   - If Render asks for a root directory, set it to `face-api`.
-5. Click **Apply** / **Create**. The first build takes a while (5–10 minutes)
-   because it downloads the face recognition model weights.
-6. Once deployed, Render gives you a URL like
-   `https://faceattend-face-api.onrender.com`. Also note the `FACE_API_KEY`
-   value Render auto-generated for you (Environment tab on the service).
-
-> **Free tier note:** Render's free web services sleep after 15 minutes of
-> inactivity and take ~30–60 seconds to wake up on the next request. That's
-> fine for testing; for real classroom use, upgrade the Render plan to
-> "Starter" or above so it stays warm.
-
-## 5. Point Convex at the face verification service
-
-Back in your terminal (with `npx convex dev` still running, or in a new
-terminal — Convex env vars are set independently of the dev process):
+In a terminal, in the `faceattend` folder:
 
 ```bash
-npx convex env set FACE_API_URL https://faceattend-face-api.onrender.com
-npx convex env set FACE_API_KEY <the key Render generated>
+npx convex env set FACEPP_API_KEY <your api key>
+npx convex env set FACEPP_API_SECRET <your api secret>
+```
+
+Face++ has separate US and China endpoints. The app defaults to the US
+endpoint (`https://api-us.faceplusplus.com`); if your Face++ console shows
+you a different base URL, set it explicitly:
+
+```bash
+npx convex env set FACEPP_API_BASE_URL https://api-us.faceplusplus.com
+```
+
+Double check both are set:
+```bash
+npx convex env list
 ```
 
 ## 6. Push to GitHub
 
-Create an empty repository on GitHub first (github.com → New repository →
-name it `faceattend` → **do not** initialize with a README, since you already
-have one).
-
-Then, from the `faceattend` folder:
+Create an empty repository on GitHub first (don't initialize it with a
+README, since you already have one), then from the `faceattend` folder:
 
 ```bash
 git init
 git add .
-git commit -m "Initial commit: FaceAttend app, Convex backend, DeepFace service"
+git commit -m "Initial commit: FaceAttend app + Convex backend (Face++ verification)"
 git branch -M main
 git remote add origin https://github.com/<your-username>/faceattend.git
 git push -u origin main
 ```
 
-(If `git` asks for credentials, GitHub no longer accepts your account
-password directly — you'll need a **Personal Access Token**: GitHub →
-Settings → Developer settings → Personal access tokens → generate one with
-`repo` scope, and use that as the password when prompted.)
-
 ## 7. Preloaded courses (automatic)
 
-The app now ships with 4 demo courses, each with an open "Today's Session"
+The app ships with 4 demo courses, each with an open "Today's Session"
 attendance window, seeded automatically the first time the app connects to
 your Convex backend:
 
@@ -131,19 +106,13 @@ your Convex backend:
 - PHY 210 — Electromagnetism
 - ENG 105 — Technical Writing
 
-Every student who registers is auto-enrolled in all of them, so as soon as
-you register a test account you'll see all 4 with a **Check In** button on
-the dashboard — no manual setup needed.
+Every student who registers is auto-enrolled in all of them.
 
-To add your real courses instead, use the Convex dashboard's **Functions**
-tab (dashboard.convex.dev → your project → Functions):
+To add real courses instead, use the Convex dashboard's **Functions** tab:
 - `courses:createCourse` — `{ "code": "...", "title": "...", "lecturer": "..." }`
 - `courses:enrollStudentInCourse` — `{ "courseId": "...", "studentId": "..." }`
-- `courses:openClassSession` / `courses:closeClassSession` — to open/close a
-  live attendance window for a course each class period
-
-(For a real deployment you'd want an admin/lecturer screen for this instead
-of the dashboard — happy to build that next if useful.)
+- `courses:openClassSession` / `courses:closeClassSession` — open/close a
+  live attendance window each class period
 
 ## 8. Run the app
 
@@ -151,32 +120,37 @@ of the dashboard — happy to build that next if useful.)
 npx expo start
 ```
 
-Scan the QR code with the **Expo Go** app on your phone (Android: use the
-Expo Go app's scanner; iOS: use the Camera app, which will open Expo Go).
+Scan the QR code with **Expo Go** (Android: use Expo Go's scanner; iPhone:
+use the Camera app).
 
 Flow to test:
 1. **Register** a new student account.
-2. You'll be sent to **Face Enrollment** — capture a reference photo.
-3. On the **Dashboard**, you'll already see 4 preloaded courses with open
-   sessions — tap **Check In** on any of them.
-4. The **Scanner** screen runs the liveness check: capture yourself looking
-   straight ahead, then turn your head left or right when prompted and
-   capture again. You'll land on the **Success** or **Mismatch** screen.
+2. **Face Enrollment** — the camera opens and captures your reference photo
+   automatically after a couple of seconds; no button press needed.
+3. On the **Dashboard**, tap **Check In** on any of the preloaded courses.
+4. The **Scanner** screen is fully automatic: it captures you looking
+   straight ahead, then prompts a head turn (left or right, picked at
+   random) and captures again, then verifies — no taps required.
 
 ## Notes on accuracy & security
 
-- The DeepFace service uses the `Facenet512` model with `retinaface` face
-  detection — a good balance of accuracy and speed. You can change this in
-  `face-api/app.py` (`MODEL_NAME`).
-- **Liveness detection:** the scanner captures two frames — one frontal, one
-  after prompting the student to turn their head left or right — and the
-  `/verify-liveness` endpoint checks that the eye-distance ratio shifted
-  enough between the two frames to indicate real head movement, in addition
-  to verifying identity against the enrolled photo in both frames. This
-  defeats the simplest spoofing attempt (holding up a single static photo),
-  but it is **not** a defense against a video replay attack or a 3D mask —
-  that would need a dedicated liveness model, which isn't included here.
-- Enforce HTTPS everywhere (Render and Convex both give you HTTPS by
-  default).
-- Face images are stored in Convex file storage, which is private by default
-  (URLs are only generated server-side, not exposed to other students).
+- **Liveness detection:** the app captures two frames — one frontal, one
+  after prompting a head turn — and checks that the eye-distance ratio
+  (interpupillary distance relative to face width) shifted enough between
+  them to indicate real head movement, using facial landmarks from Face++'s
+  Detect API. This defeats the simplest spoofing attempt (holding up a
+  static photo), but it is **not** a defense against a video replay attack
+  or a 3D mask — Face++ offers a more robust dedicated liveness product as
+  a separate paid feature if you want stronger anti-spoofing later.
+- **Matching threshold:** identity verification uses Face++'s suggested
+  confidence threshold for a 1e-3 false-accept-rate. You can tighten this
+  (fewer false accepts, more false rejects) by changing the threshold key in
+  `convex/faceVerification.ts` to `1e-4` or `1e-5`.
+- Face++ is a third-party service — your students' photos are sent to
+  Face++'s servers for processing. Review their data retention and privacy
+  policy before using this with real student data, and disclose this to
+  students as part of your institution's data handling requirements.
+- Face images are stored in Convex file storage, which is private by
+  default (URLs are only generated server-side, not exposed to other
+  students).
+- Enforce HTTPS everywhere (Convex and Face++ both use HTTPS by default).
